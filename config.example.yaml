@@ -1,0 +1,27 @@
+# Keep runtime data under the mounted data directory in Docker and in local runs.
+database_path: data/ddnswatch.sqlite3
+check_interval_seconds: 25
+
+tcp_ping:
+  enabled: true
+  base_url: https://tcp.ping.pe
+  min_cn_probes: 3
+  blocked_success_rate: 0.2
+  timeout_seconds: 20
+  max_polls: 20
+  poll_interval_seconds: 3
+
+telegram:
+  enabled: false
+  bot_token: "123456:telegram-bot-token"
+  chat_id: "123456789"
+  poll_commands: true
+  startup_notification: true
+
+targets:
+  - name: Example domain HTTPS
+    domain: example.com
+    port: 443
+  - name: Example host SSH
+    host: 203.0.113.10
+    port: 22
