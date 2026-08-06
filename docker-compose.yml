@@ -5,6 +5,7 @@ services:
       - "${DDNSWATCH_PORT:-8000}:8000"
     environment:
       DDNSWATCH_CONFIG: /app/data/config.yaml
+      DDNSWATCH_DATABASE_PATH: /app/data/ddnswatch.sqlite3
     volumes:
       - ./data:/app/data
     restart: unless-stopped

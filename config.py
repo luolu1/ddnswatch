@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +57,9 @@ def _require_mapping(value: Any, name: str) -> dict[str, Any]:
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     config_path = Path(path)
     if not config_path.exists():
-        return AppConfig()
+        return AppConfig(
+            database_path=os.getenv("DDNSWATCH_DATABASE_PATH", "ddnswatch.sqlite3"),
+        )
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     raw = _require_mapping(raw, "config")
@@ -110,7 +113,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         raise ValueError("check_interval_seconds must be between 20 and 30")
 
     return AppConfig(
-        database_path=str(raw.get("database_path", "ddnswatch.sqlite3")),
+        database_path=os.getenv("DDNSWATCH_DATABASE_PATH", str(raw.get("database_path", "ddnswatch.sqlite3"))),
         check_interval_seconds=interval,
         targets=targets,
         tcp_ping=tcp_ping,

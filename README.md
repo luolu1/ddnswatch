@@ -24,21 +24,21 @@ This project uses the browser flow of `tcp.ping.pe`. It is an **unofficial webpa
 
 ## Docker Compose 快速部署 / Quick deployment
 
-Docker 镜像构建时不会复制真实配置；配置和数据库都放在宿主机的 `data/` 目录。首次部署：
+Docker 镜像构建时不会复制真实配置；首次启动时如果 `data/config.yaml` 不存在，入口脚本会自动从 `config.example.yaml` 创建它。配置和数据库都放在宿主机的 `data/` 目录。首次部署：
 
 ```bash
 mkdir -p data && cp config.example.yaml data/config.yaml && docker compose up -d --build
 ```
 
-容器以非 root 用户 UID/GID `10001` 运行。若宿主机创建的 `data` 目录不可写，请在首次启动前授权：
+Compose 会将数据库固定写入 `/app/data/ddnswatch.sqlite3`。容器默认以 root 运行，以兼容 Docker 首次创建的 root-owned bind mount；如果你希望使用非 root 运行方式，请先将宿主机目录授权给 UID/GID `10001`，并在 Compose 中覆盖用户配置：
 
 ```bash
 sudo chown -R 10001:10001 data
 ```
 
-`docker-compose.yml` 挂载 `./data:/app/data`，并将 `DDNSWATCH_CONFIG` 设置为 `/app/data/config.yaml`；因此数据库默认写入 `data/ddnswatch.sqlite3`。可用 `DDNSWATCH_PORT` 修改对外端口。
+然后在 `docker-compose.yml` 的服务中增加 `user: "10001:10001"` 即可使用非 root 模式。`docker-compose.yml` 挂载 `./data:/app/data`，设置 `DDNSWATCH_CONFIG=/app/data/config.yaml` 和 `DDNSWATCH_DATABASE_PATH=/app/data/ddnswatch.sqlite3`。可用 `DDNSWATCH_PORT` 修改对外端口。
 
-The image never copies a real configuration. `./data` is mounted at `/app/data`, and the container runs as UID/GID `10001`. Make the bind mount writable for that user when needed.
+The image never copies a real configuration. On first startup, the entrypoint creates `data/config.yaml` from the example when it is missing. `./data` is mounted at `/app/data`, and the Compose environment explicitly stores SQLite at `/app/data/ddnswatch.sqlite3`. The default root mode avoids first-run bind-mount permission failures; use a pre-owned directory and UID/GID `10001:10001` if you require non-root execution.
 
 ## 手动 Python 部署 / Manual Python deployment
 
