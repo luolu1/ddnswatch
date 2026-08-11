@@ -11,7 +11,7 @@ DDNSWatch is a FastAPI service for monitoring host/domain TCP reachability signa
 - SQLite 保存原始检测结果，并提供最近 60 个 UTC 分钟桶、最新状态和正常率。
 - 状态从 `normal` 变为 `blocked`，或从 `blocked` 恢复为 `normal` 时发送 Telegram 通知。
 - Telegram Bot 菜单提供“查看全部状态”“立即检测”“帮助”，也支持 `/start`、`/status`、`/refresh`、`/help`。
-- 启动时可发送“DDNSWatch 已上线”通知；只接受配置的 `chat_id`。
+- 启动时可向多个 `chat_ids` 发送“DDNSWatch 已上线”通知；只接受配置账号的命令。
 - YAML configuration for named host/domain targets, ports, intervals, and Telegram.
 - SQLite history, a health endpoint, a web console, and a JSON status API.
 - Telegram menu, startup/上线 notification, blocked/recovery notifications, and manual refresh commands.
@@ -57,17 +57,19 @@ For a manual install, create a virtual environment, copy the example configurati
 ## Telegram 配置 / Telegram setup
 
 1. 在 Telegram 联系 `@BotFather` 创建 Bot，取得 bot token。
-2. Compose 部署时编辑 `data/config.yaml`，将 `telegram.enabled` 改为 `true`，填写 `bot_token` 和目标会话的 `chat_id`。
+2. Compose 部署时编辑 `data/config.yaml`，将 `telegram.enabled` 改为 `true`，填写 `bot_token` 和目标会话的 `chat_ids` 列表。
 3. `poll_commands: true` 启用 Bot 菜单和命令；`startup_notification: true` 启用上线通知。
 4. 目标被判定为被墙时发送通知，恢复为正常时发送恢复通知。菜单包含状态、立即检测和帮助。
 
-Set the authorized `chat_id`; updates from other chats are ignored. If a token is ever exposed, immediately revoke it in `@BotFather` and replace it with a newly issued token.
+Set the authorized `chat_ids`; notifications are sent to every configured chat and updates from other chats are ignored. The legacy single `chat_id` option remains supported. If a token is ever exposed, immediately revoke it in `@BotFather` and replace it with a newly issued token.
 
 ```yaml
 telegram:
   enabled: true
   bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
-  chat_id: "YOUR_CHAT_ID"
+  chat_ids:
+    - "YOUR_FIRST_CHAT_ID"
+    - "YOUR_SECOND_CHAT_ID"
   poll_commands: true
   startup_notification: true
 ```
