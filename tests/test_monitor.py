@@ -14,6 +14,7 @@ from monitor import (
     CheckResult,
     Monitor,
     TelegramBotService,
+    TelegramNotifier,
     TcpPingChecker,
     aggregate_minute_history,
     aggregate_tcp_ping_results,
@@ -38,6 +39,18 @@ def test_check_interval_is_validated(tmp_path, interval: int) -> None:
     path.write_text(f"check_interval_seconds: {interval}\n", encoding="utf-8")
     with pytest.raises(ValueError):
         load_config(path)
+
+
+def test_telegram_config_loads_multiple_chat_ids(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("telegram:\n  chat_ids: [42, '84']\n", encoding="utf-8")
+    assert load_config(path).telegram.recipient_chat_ids == ("42", "84")
+
+
+def test_telegram_config_keeps_legacy_chat_id(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("telegram:\n  chat_id: 42\n", encoding="utf-8")
+    assert load_config(path).telegram.recipient_chat_ids == ("42",)
 
 
 def test_tcp_task_and_cookie_extraction() -> None:
@@ -221,6 +234,22 @@ class FakeTelegramClient:
 
 
 @pytest.mark.asyncio
+async def test_telegram_notifier_sends_to_every_configured_chat() -> None:
+    config = TelegramConfig(enabled=True, bot_token="test-token", chat_ids=("42", "84"))
+    client = FakeTelegramClient()
+    notifier = TelegramNotifier(config, http_client_factory=lambda **kwargs: client)
+    await notifier.send("test message")
+    assert [payload["chat_id"] for _, payload in client.calls] == ["42", "84"]
+
+
+@pytest.mark.asyncio
+async def test_telegram_notifier_rejects_missing_chat_ids() -> None:
+    notifier = TelegramNotifier(TelegramConfig(enabled=True, bot_token="test-token"))
+    with pytest.raises(ValueError, match="chat_id or chat_ids"):
+        await notifier.send("test message")
+
+
+@pytest.mark.asyncio
 async def test_telegram_startup_and_menu_use_injected_client(tmp_path) -> None:
     config = TelegramConfig(enabled=True, bot_token="test-token", chat_id="42")
     client = FakeTelegramClient()
@@ -299,3 +328,12 @@ def test_telegram_authorization_and_status_text(tmp_path) -> None:
     assert "端口: 443" in text
     assert "当前状态: 正常" in text
     assert "最后检测时间: 2026-08-05T12:00:00+00:00" in text
+
+
+def test_telegram_authorizes_every_configured_chat() -> None:
+    service = TelegramBotService(
+        TelegramConfig(enabled=True, bot_token="test-token", chat_ids=("42", "84"))
+    )
+    assert service.is_authorized(42)
+    assert service.is_authorized(84)
+    assert not service.is_authorized(21)

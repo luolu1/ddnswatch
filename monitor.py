@@ -42,14 +42,14 @@ class TelegramNotifier:
 
     def _url(self, method: str) -> str:
         if not self.config.bot_token:
-            raise ValueError("Telegram is enabled but bot_token/chat_id is missing")
+            raise ValueError("Telegram bot_token is missing")
         return f"https://api.telegram.org/bot{self.config.bot_token}/{method}"
 
     async def _request(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.config.enabled:
             return {}
-        if not self.config.bot_token or not self.config.chat_id:
-            raise ValueError("Telegram is enabled but bot_token/chat_id is missing")
+        if not self.config.bot_token or not self.config.recipient_chat_ids:
+            raise ValueError("Telegram is enabled but bot_token/chat_id or chat_ids is missing")
         async with self.http_client_factory(timeout=10) as client:
             response = await client.post(self._url(method), json=payload)
             response.raise_for_status()
@@ -59,15 +59,16 @@ class TelegramNotifier:
             return payload
 
     async def send(self, message: str, reply_markup: dict[str, Any] | None = None) -> None:
-        payload: dict[str, Any] = {"chat_id": self.config.chat_id, "text": message}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        await self._request("sendMessage", payload)
+        if self.config.enabled and not self.config.recipient_chat_ids:
+            raise ValueError("Telegram is enabled but chat_id or chat_ids is missing")
+        for chat_id in self.config.recipient_chat_ids:
+            payload: dict[str, Any] = {"chat_id": chat_id, "text": message}
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+            await self._request("sendMessage", payload)
 
 
 class TelegramBotService:
-    """Small Telegram Bot API long-polling service for a single authorized chat."""
-
     COMMANDS = [
         {"command": "start", "description": "显示监控菜单"},
         {"command": "status", "description": "查看全部状态"},
@@ -87,7 +88,7 @@ class TelegramBotService:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.config.enabled and self.config.bot_token and self.config.chat_id)
+        return bool(self.config.enabled and self.config.bot_token and self.config.recipient_chat_ids)
 
     def _url(self, method: str) -> str:
         if not self.config.bot_token:
@@ -127,7 +128,7 @@ class TelegramBotService:
             logging.exception("Failed to initialize Telegram bot")
 
     def is_authorized(self, chat_id: object) -> bool:
-        return self.config.chat_id is not None and str(chat_id) == str(self.config.chat_id)
+        return str(chat_id) in self.config.recipient_chat_ids
 
     def status_text(self, monitor: "Monitor") -> str:
         status = monitor.api_status()
