@@ -14,9 +14,7 @@ tcp_ping:
 telegram:
   enabled: false
   bot_token: "123456:telegram-bot-token"
-  chat_ids:
-    - "123456789"
-    - "987654321"
+  chat_id: "123456789"
   poll_commands: true
   startup_notification: true
 
