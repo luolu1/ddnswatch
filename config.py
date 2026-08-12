@@ -24,13 +24,8 @@ class TelegramConfig:
     enabled: bool = False
     bot_token: str | None = None
     chat_id: str | None = None
-    chat_ids: tuple[str, ...] = ()
     poll_commands: bool = True
     startup_notification: bool = True
-
-    @property
-    def recipient_chat_ids(self) -> tuple[str, ...]:
-        return self.chat_ids or ((self.chat_id,) if self.chat_id else ())
 
 
 @dataclass(frozen=True)
@@ -86,14 +81,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         )
 
     tg_raw = _require_mapping(raw.get("telegram", {}), "telegram")
-    raw_chat_ids = tg_raw.get("chat_ids", [])
-    if not isinstance(raw_chat_ids, list):
-        raise ValueError("telegram.chat_ids must be a list")
     telegram = TelegramConfig(
         enabled=bool(tg_raw.get("enabled", False)),
         bot_token=str(tg_raw["bot_token"]) if tg_raw.get("bot_token") else None,
         chat_id=str(tg_raw["chat_id"]) if tg_raw.get("chat_id") else None,
-        chat_ids=tuple(str(chat_id) for chat_id in raw_chat_ids),
         poll_commands=bool(tg_raw.get("poll_commands", True)),
         startup_notification=bool(tg_raw.get("startup_notification", True)),
     )
