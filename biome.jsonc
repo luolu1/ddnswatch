@@ -1,8 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
-  "files": {
-    "includes": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "*.json", "*.jsonc"]
-  },
+  "files": { "includes": ["src/**/*.ts", "tests/**/*.ts", "*.json", "*.jsonc"] },
   "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 100 },
   "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "asNeeded" } },
   "linter": {
