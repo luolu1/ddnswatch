@@ -181,29 +181,9 @@ Wrangler 更简单，除非你正在编写自己的部署平台。
 
 只有当 `MONITOR_CONFIG_JSON` 中 `telegram.enabled` 为 `true` 时，才需要设置：
 
-```json
-"telegram": { "enabled": true }
-```
-
-机器人配置由三个部分组成：
-
-| 配置 | 保存位置 | 说明 |
-| --- | --- | --- |
-| `telegram.enabled` | `wrangler.jsonc` 的 `MONITOR_CONFIG_JSON` | 是否启用通知 |
-| `TELEGRAM_BOT_TOKEN` | Cloudflare Worker secret | `@BotFather` 提供的机器人 Token |
-| `TELEGRAM_CHAT_ID` | Cloudflare Worker secret | 接收通知的用户、群组或频道 ID |
-
-设置两个加密 secrets：
-
 ```bash
 bunx wrangler secret put TELEGRAM_BOT_TOKEN
 bunx wrangler secret put TELEGRAM_CHAT_ID
-```
-
-执行第一条命令后粘贴 Bot Token，执行第二条命令后粘贴 Chat ID。设置完成后重新部署：
-
-```bash
-bunx wrangler deploy
 ```
 
 命令会交互式读取值，不要把 token 或 chat ID 放在命令参数、
