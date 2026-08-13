@@ -1,20 +1,28 @@
 import * as z from "zod"
 import { parseConfig } from "./config"
+import type { AssetFetcher } from "./embedded-assets"
 import { checkAll } from "./monitor"
 import { notifyTelegram } from "./telegram"
 
-const envSchema = z.object({
+const runtimeEnvSchema = z.object({
   MONITOR_CONFIG_JSON: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
-  ASSETS: z.custom<Readonly<{ fetch(request: Request): Promise<Response> }>>(
+})
+const envSchema = runtimeEnvSchema.extend({
+  ASSETS: z.custom<AssetFetcher>(
     (value) => typeof value === "object" && value !== null && "fetch" in value,
   ),
 })
 export type Env = Readonly<z.infer<typeof envSchema>>
+export type RuntimeEnv = Readonly<z.infer<typeof runtimeEnvSchema>>
+export type WorkerHandlers = Readonly<{
+  fetch(request: Request, env: RuntimeEnv): Promise<Response>
+  scheduled(controller: ScheduledController, env: RuntimeEnv): Promise<void>
+}>
 
 function telegramCredentials(
-  env: Env,
+  env: RuntimeEnv,
   enabled: boolean,
 ): Readonly<{ botToken: string | undefined; chatId: string | undefined }> {
   if (enabled && (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID)) {
@@ -43,35 +51,48 @@ function statelessStatus(
   })
 }
 
+export function createWorker(assets: AssetFetcher): WorkerHandlers {
+  return {
+    async fetch(request: Request, rawEnv: RuntimeEnv): Promise<Response> {
+      const env = runtimeEnvSchema.parse(rawEnv)
+      const config = parseConfig(env.MONITOR_CONFIG_JSON)
+      telegramCredentials(env, config.telegram.enabled)
+      const path = new URL(request.url).pathname
+      if (request.method !== "GET" && (path === "/health" || path === "/api/status")) {
+        return Response.json({ error: "method not allowed" }, { status: 405 })
+      }
+      if (path === "/health") return Response.json({ status: "ok" })
+      if (path === "/api/status") return statelessStatus(config, await checkAll(config))
+      if (path.startsWith("/api/")) return Response.json({ error: "not found" }, { status: 404 })
+      return assets.fetch(request)
+    },
+    async scheduled(_controller: ScheduledController, rawEnv: RuntimeEnv): Promise<void> {
+      const env = runtimeEnvSchema.parse(rawEnv)
+      const config = parseConfig(env.MONITOR_CONFIG_JSON)
+      const results = await checkAll(config)
+      const credentials = telegramCredentials(env, config.telegram.enabled)
+      const failures: Error[] = []
+      for (const checked of results) {
+        if (checked.result.status === "normal") continue
+        try {
+          await notifyTelegram(config.telegram, checked, credentials)
+        } catch (error) {
+          failures.push(error instanceof Error ? error : new TypeError(String(error)))
+        }
+      }
+      if (failures.length > 0) throw new AggregateError(failures, "Telegram notifications failed")
+    },
+  }
+}
+
 export const worker = {
   async fetch(request: Request, rawEnv: Env): Promise<Response> {
     const env = envSchema.parse(rawEnv)
-    const config = parseConfig(env.MONITOR_CONFIG_JSON)
-    telegramCredentials(env, config.telegram.enabled)
-    const path = new URL(request.url).pathname
-    if (request.method !== "GET" && (path === "/health" || path === "/api/status")) {
-      return Response.json({ error: "method not allowed" }, { status: 405 })
-    }
-    if (path === "/health") return Response.json({ status: "ok" })
-    if (path === "/api/status") return statelessStatus(config, await checkAll(config))
-    if (path.startsWith("/api/")) return Response.json({ error: "not found" }, { status: 404 })
-    return env.ASSETS.fetch(request)
+    return createWorker(env.ASSETS).fetch(request, env)
   },
-  async scheduled(_controller: ScheduledController, rawEnv: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, rawEnv: Env): Promise<void> {
     const env = envSchema.parse(rawEnv)
-    const config = parseConfig(env.MONITOR_CONFIG_JSON)
-    const results = await checkAll(config)
-    const credentials = telegramCredentials(env, config.telegram.enabled)
-    const failures: Error[] = []
-    for (const checked of results) {
-      if (checked.result.status === "normal") continue
-      try {
-        await notifyTelegram(config.telegram, checked, credentials)
-      } catch (error) {
-        failures.push(error instanceof Error ? error : new TypeError(String(error)))
-      }
-    }
-    if (failures.length > 0) throw new AggregateError(failures, "Telegram notifications failed")
+    await createWorker(env.ASSETS).scheduled(controller, env)
   },
 } satisfies ExportedHandler<Env>
 
