@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111820">
+  <meta name="description" content="DDNS Watch 实时查看中国大陆 TCP 端口可达性。">
+  <title>DDNS Watch · 解析监控</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="DDNS Watch 首页">
+        <span class="brand-mark"><i data-lucide="activity"></i></span>
+        <span>DDNS <b>WATCH</b></span>
+      </a>
+      <div class="topbar-meta">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span id="connection-label">正在连接</span>
+        <span class="separator">/</span>
+        <span id="refresh-label">每 60 秒检测</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">MAINLAND TCP REACHABILITY</p>
+          <h1 id="page-title">解析状态</h1>
+          <p class="intro-copy">无状态实时查看中国大陆网络中的 DNS 解析与 TCP 端口可达性。</p>
+        </div>
+        <div class="refresh-control">
+          <span>下次刷新 <strong id="countdown">60s</strong></span>
+          <button class="icon-button" id="refresh-button" type="button" title="立即刷新" aria-label="立即刷新">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
+      </section>
+
+      <section class="targets" aria-labelledby="targets-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">MONITORED TARGETS</p><h2 id="targets-title">目标状态</h2></div>
+          <div class="legend" aria-label="状态图例"><span><i class="legend-swatch is-good"></i>正常</span><span><i class="legend-swatch is-blocked"></i>不可达</span><span><i class="legend-swatch is-unknown"></i>未知</span></div>
+        </div>
+        <div id="target-list" class="target-list" aria-live="polite"></div>
+        <div class="empty-state" id="empty-state" hidden><i data-lucide="inbox"></i><span id="empty-state-text">暂无配置的监控目标</span></div>
+        <div class="connection-notice" id="connection-notice" hidden role="status"><i data-lucide="wifi-off"></i><div><strong>API 连接失败</strong><span>当前无法取得最新检测结果，请稍后重试。</span></div></div>
+      </section>
+    </main>
+
+    <footer><span>DDNS WATCH</span><span>STATELESS MAINLAND CHECK</span></footer>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
