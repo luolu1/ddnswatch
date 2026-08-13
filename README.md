@@ -27,7 +27,42 @@ This project uses the browser flow of `tcp.ping.pe`. It is an **unofficial webpa
 Docker 镜像构建时不会复制真实配置；首次启动时如果 `data/config.yaml` 不存在，入口脚本会自动从 `config.example.yaml` 创建它。配置和数据库都放在宿主机的 `data/` 目录。首次部署：
 
 ```bash
-mkdir -p data && cp config.example.yaml data/config.yaml && docker compose up -d --build
+mkdir -p data
+cp config.example.yaml data/config.yaml
+docker compose up -d --build
+```
+
+The Compose topology builds a local `warp-proxy` gateway. On its first start it
+registers a free consumer WARP account, generates a profile, removes IPv6
+routes/addresses, creates WireProxy HTTP/SOCKS5 listeners, validates the
+configuration, and starts WireProxy. Credentials persist in the named
+`warp-state` volume, so later starts do not register again. The build pins
+wgcf `v2.2.29` and WireProxy `v1.1.2` and supports amd64/arm64. No manual
+`warp.conf`, host-specific detection, fscarmen script, TUN, or privileged mode
+is required. See [`warp-proxy/README.md`](warp-proxy/README.md) for details.
+
+Compose 会在本地构建 `warp-proxy` 网关。首次启动时，网关自动接受 WARP
+服务条款并注册免费消费者账户，生成配置后移除 IPv6 地址和 `::/0` 路由，
+再启动仅供 Compose 内部使用的 HTTP/SOCKS5 代理。账户和密钥保存在
+`warp-state` 命名卷中，后续重启会直接复用，不会重复注册。wgcf 是非官方
+客户端，Cloudflare 接口变化、限流或停止兼容都可能导致首次注册失败。
+
+验证 WARP IPv4 出口：
+
+```bash
+docker compose exec ddnswatch python -c \
+  "import httpx; print(httpx.get('https://www.cloudflare.com/cdn-cgi/trace', timeout=10, trust_env=True).text)"
+```
+
+该命令与应用使用相同的 httpx 环境代理设置；输出应包含 `warp=on`。它验证 HTTPS
+请求经过 WireProxy/WARP；它不会证明 libc DNS 被代理。DDNSWatch 对监控域名调用的
+`getaddrinfo` 仍使用容器的普通 DNS 解析路径。
+
+如需删除旧凭据并重新注册：
+
+```bash
+docker compose down -v
+docker compose up -d --build
 ```
 
 Compose 会将数据库固定写入 `/app/data/ddnswatch.sqlite3`。容器默认以 root 运行，以兼容 Docker 首次创建的 root-owned bind mount；如果你希望使用非 root 运行方式，请先将宿主机目录授权给 UID/GID `10001`，并在 Compose 中覆盖用户配置：
@@ -39,6 +74,13 @@ sudo chown -R 10001:10001 data
 然后在 `docker-compose.yml` 的服务中增加 `user: "10001:10001"` 即可使用非 root 模式。`docker-compose.yml` 挂载 `./data:/app/data`，设置 `DDNSWATCH_CONFIG=/app/data/config.yaml` 和 `DDNSWATCH_DATABASE_PATH=/app/data/ddnswatch.sqlite3`。可用 `DDNSWATCH_PORT` 修改对外端口。
 
 The image never copies a real configuration. On first startup, the entrypoint creates `data/config.yaml` from the example when it is missing. `./data` is mounted at `/app/data`, and the Compose environment explicitly stores SQLite at `/app/data/ddnswatch.sqlite3`. The default root mode avoids first-run bind-mount permission failures; use a pre-owned directory and UID/GID `10001:10001` if you require non-root execution.
+
+All outbound HTTP(S) calls made by ddnswatch, including the tcp.ping.pe browser
+flow and Telegram Bot API, use the sidecar through `HTTP_PROXY`, `HTTPS_PROXY`,
+and `ALL_PROXY` (uppercase and lowercase forms). Every production httpx client
+sets `trust_env=True`. Loopback destinations are excluded with `NO_PROXY`. DNS
+resolver behavior is unchanged: libc DNS itself is not proxied, and monitored
+domains are still resolved locally to IPv4 before tcp.ping.pe is called.
 
 ## 手动 Python 部署 / Manual Python deployment
 
@@ -102,6 +144,10 @@ docker compose up -d --build
 - `GET /api/status`：返回目标最新记录、最近 60 个 UTC 分钟桶、`last_check_at`、`last_status` 和正常率。
 
 The Compose healthcheck calls `http://127.0.0.1:8000/health` inside the container.
+The `warp-proxy` service has its own bounded `/readyz` healthcheck, and
+ddnswatch waits for that service to become healthy before starting. To verify
+IPv4 egress explicitly, use the command above or the details in
+[`warp-proxy/README.md`](warp-proxy/README.md).
 
 ## 测试 / Tests
 
