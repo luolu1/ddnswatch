@@ -135,48 +135,6 @@ bunx wrangler deploy
 Wrangler 会部署 `src/index.ts`、`public/` 静态资源、`wrangler.jsonc` 中的普通变量
 和 Cron 配置。Worker 名称为 `ddnswatch`。
 
-### 不连接 GitHub，直接上传完整项目
-
-这是本项目最简单的“上传文件部署”方式，不需要配置 Workers Builds，也不需要让
-Cloudflare 访问 GitHub。下载或解压项目后，在项目根目录运行：
-
-```bash
-bun install --frozen-lockfile
-bun run check
-bunx wrangler login
-bunx wrangler deploy
-```
-
-`wrangler deploy` 会自动完成以下工作：
-
-1. 将 TypeScript Worker 打包成可运行的 JavaScript。
-2. 上传 `public/` 中的 HTML、JavaScript 和 CSS 静态文件。
-3. 创建 `ASSETS` binding，使 Worker 可以返回这些静态文件。
-4. 部署 `MONITOR_CONFIG_JSON` 普通变量和每分钟 Cron Trigger。
-5. 发布为一个完整的 `ddnswatch` Worker，而不是分别部署前端和后端。
-
-以后修改代码或静态文件后，在同一目录再次运行 `bunx wrangler deploy` 即可覆盖更新。
-若启用了 Telegram，首次部署后还要按下一节设置两个 secrets；普通重新部署不会要求
-把 secrets 写入本地文件。
-
-### 仅上传静态文件的限制
-
-Cloudflare 可以部署只有静态资源的站点，但这种方式不适用于完整的 DDNSWatch。
-单独上传 `public/` 只能显示页面外壳，以下功能都依赖 `src/` 中的 Worker：
-
-- `/api/status` 实时检测接口；
-- Cloudflare DNS over HTTPS 解析；
-- `tcp.ping.pe` TCP 可达性检测；
-- 每分钟 Cron Trigger；
-- Telegram 通知。
-
-因此，不要只把 `public/` 拖放成静态站点。需要完整功能时，应使用上面的
-`bunx wrangler deploy`，它会把 Worker 与静态资源作为同一个部署上传。
-
-Cloudflare 也提供通过 Workers API 分批上传静态资源、Worker module 和部署版本的
-Direct Upload API，但这是面向自定义发布系统的高级接口。对本仓库而言，它不会比
-Wrangler 更简单，除非你正在编写自己的部署平台。
-
 ### 可选 Telegram secrets
 
 只有当 `MONITOR_CONFIG_JSON` 中 `telegram.enabled` 为 `true` 时，才需要设置：
