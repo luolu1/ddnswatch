@@ -19,6 +19,10 @@ import httpx
 from config import AppConfig, TargetConfig, TcpPingConfig, TelegramConfig
 
 
+def create_http_client(**kwargs: Any) -> httpx.AsyncClient:
+    return httpx.AsyncClient(trust_env=True, **kwargs)
+
+
 STATUS_NORMAL = "normal"
 STATUS_BLOCKED = "blocked"
 STATUS_UNKNOWN = "unknown"
@@ -38,7 +42,7 @@ class ConnectivityChecker(Protocol):
 class TelegramNotifier:
     def __init__(self, config: TelegramConfig, *, http_client_factory: Callable[..., Any] | None = None):
         self.config = config
-        self.http_client_factory = http_client_factory or httpx.AsyncClient
+        self.http_client_factory = http_client_factory or create_http_client
 
     def _url(self, method: str) -> str:
         if not self.config.bot_token:
@@ -80,7 +84,7 @@ class TelegramBotService:
                  notifier: TelegramNotifier | None = None):
         self.config = config
         self.notifier = notifier or TelegramNotifier(config, http_client_factory=http_client_factory)
-        self.http_client_factory = http_client_factory or httpx.AsyncClient
+        self.http_client_factory = http_client_factory or create_http_client
         self._stopped = asyncio.Event()
         self._offset: int | None = None
         self._refresh_task: asyncio.Task[None] | None = None
@@ -256,7 +260,7 @@ class TcpPingChecker:
         self.timeout, self.base_url = timeout, base_url.rstrip("/")
         self.min_cn_probes, self.blocked_success_rate = min_cn_probes, blocked_success_rate
         self.max_polls, self.poll_interval_seconds = max_polls, poll_interval_seconds
-        self.http_client_factory = http_client_factory or httpx.AsyncClient
+        self.http_client_factory = http_client_factory or create_http_client
         self.sleep = sleep or asyncio.sleep
 
     async def check(self, target: TargetConfig, resolved_ip: str | None) -> CheckResult:

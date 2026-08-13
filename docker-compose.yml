@@ -1,11 +1,39 @@
 services:
+  warp-proxy:
+    build:
+      context: ./warp-proxy
+    expose:
+      - "25344"
+      - "25345"
+      - "9080"
+    volumes:
+      - warp-state:/var/lib/warp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
   ddnswatch:
     build: .
+    depends_on:
+      warp-proxy:
+        condition: service_healthy
     ports:
       - "${DDNSWATCH_PORT:-8000}:8000"
     environment:
       DDNSWATCH_CONFIG: /app/data/config.yaml
       DDNSWATCH_DATABASE_PATH: /app/data/ddnswatch.sqlite3
+      HTTP_PROXY: http://warp-proxy:25345
+      HTTPS_PROXY: http://warp-proxy:25345
+      ALL_PROXY: http://warp-proxy:25345
+      NO_PROXY: localhost,127.0.0.1,::1
+      http_proxy: http://warp-proxy:25345
+      https_proxy: http://warp-proxy:25345
+      all_proxy: http://warp-proxy:25345
+      no_proxy: localhost,127.0.0.1,::1
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -21,3 +49,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  warp-state:
