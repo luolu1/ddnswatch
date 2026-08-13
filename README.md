@@ -31,75 +31,13 @@ Telegram 通知是可选功能。启用后，只有 Cron 本轮得到 `blocked` 
 - 本地 Wrangler 开发服务器中的 Cron 测试地址是
   `/cdn-cgi/handler/scheduled?format=json`。
 
-## 源码部署前置条件
-
-如果只使用下一节的 ZIP 上传，可以跳过本节，不需要安装任何工具。
+## 前置条件
 
 - 一个可以部署 Workers 的 Cloudflare 账号。
 - [Bun](https://bun.sh/)，项目在 `package.json` 中固定为 `bun@1.3.14`。
 - 首次使用 CLI 部署时，需要浏览器登录 Cloudflare。
 - 如需 Telegram 通知，需要由 `@BotFather` 创建的 Bot token，以及接收消息的
   chat ID。不要把真实凭据写入仓库。
-
-## 最简单部署：直接上传 ZIP
-
-不需要 GitHub、Bun、Wrangler 或命令行。直接下载仓库中的：
-
-- [`release/ddnswatch-cloudflare-upload.zip`](release/ddnswatch-cloudflare-upload.zip)
-- 完整 Worker 单文件：[`release/_worker.js`](release/_worker.js)
-
-然后在 Cloudflare Dashboard 中执行：
-
-1. 进入 **Workers & Pages**。
-2. 选择创建应用，然后选择 **Pages / Direct Upload / Drag and drop**。
-3. 输入项目名称，例如 `ddnswatch`。
-4. 上传 `ddnswatch-cloudflare-upload.zip` 并部署。
-5. 在项目的 Variables and Secrets 中添加下面三项配置。
-
-普通变量：
-
-| 名称 | 示例值 |
-| --- | --- |
-| `MONITOR_CONFIG_JSON` | `{"check_interval_seconds":60,"targets":[{"name":"网站 HTTPS","host":"example.com","port":443}],"telegram":{"enabled":true}}` |
-
-加密 Secret：
-
-| 名称 | 值 |
-| --- | --- |
-| `TELEGRAM_BOT_TOKEN` | `@BotFather` 提供的机器人 Token |
-| `TELEGRAM_CHAT_ID` | 接收通知的用户、群组或频道 ID |
-
-不需要 Telegram 时，将 JSON 中的 `"enabled":true` 改成 `false`，并且不用添加两个
-Telegram secrets。保存变量后重新部署一次 ZIP，或者在 Dashboard 中重试最新部署。
-
-ZIP 顶层只有一个预编译的 `_worker.js`。网页 HTML、CSS、JavaScript、监控逻辑和
-依赖已经全部打包在里面，不需要上传其他文件。
-
-> Cloudflare 的 Dashboard ZIP 拖拽入口属于 Pages Direct Upload。它可以运行
-> `_worker.js` 和实时 `/api/status`，但不能从 ZIP 创建 Workers Cron Trigger。
-> 因此这种最简单部署方式可以使用网页手动检测和每 60 秒刷新，但不会在无人访问时
-> 自动执行 Telegram 定时检查。Cloudflare 当前没有能够仅靠 ZIP 同时创建 Worker、
-> 变量和 Cron 的 Dashboard 上传格式。需要后台 Cron 时，仍需使用后文的 Wrangler
-> 部署，或在支持 Scheduled Handler 的 Worker 部署后手动添加 `* * * * *` Trigger。
-
-如果必须保留每分钟后台检测和 Telegram 定时通知，请在 Cloudflare Workers 在线编辑器
-中使用 `release/_worker.js` 创建 Worker，然后配置同样的三个变量，并在 Worker 的
-Triggers/Cron Triggers 中添加：
-
-```text
-* * * * *
-```
-
-Cloudflare Workers Dashboard 当前不提供“上传 ZIP 后同时创建 Worker、静态资源和
-Cron”的格式，所以完整定时版仍需要手动添加这一个 Trigger；代码本身不需要修改或
-本地构建。
-
-可以用同目录的 `.sha256` 文件校验下载内容：
-
-```bash
-cd release
-sha256sum -c ddnswatch-cloudflare-upload.zip.sha256
-```
 
 先安装锁定的依赖：
 
