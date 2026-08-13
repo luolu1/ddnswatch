@@ -5,6 +5,13 @@
   "compatibility_date": "2026-08-01",
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   "triggers": { "crons": ["* * * * *"] },
+  // Telegram is optional. To enable it:
+  // 1. Change telegram.enabled to true in MONITOR_CONFIG_JSON below.
+  // 2. Store the two encrypted Worker secrets (never put their values in this file):
+  //    bunx wrangler secret put TELEGRAM_BOT_TOKEN
+  //    bunx wrangler secret put TELEGRAM_CHAT_ID
+  // The Worker reads those exact binding names from env.TELEGRAM_BOT_TOKEN and
+  // env.TELEGRAM_CHAT_ID. For local development, set them in .dev.vars.
   "vars": {
     "MONITOR_CONFIG_JSON": "{\"check_interval_seconds\":60,\"targets\":[{\"name\":\"Example HTTPS\",\"host\":\"example.com\",\"port\":443}],\"telegram\":{\"enabled\":false}}"
   }
