@@ -1,0 +1,6 @@
+# Local-only Wrangler variables. Copy this file to .dev.vars and edit it.
+MONITOR_CONFIG_JSON='{"check_interval_seconds":60,"targets":[{"name":"Example HTTPS","host":"example.com","port":443}],"telegram":{"enabled":false}}'
+
+# Required only when telegram.enabled is true.
+TELEGRAM_BOT_TOKEN=replace-with-local-telegram-bot-token
+TELEGRAM_CHAT_ID=replace-with-local-telegram-chat-id
