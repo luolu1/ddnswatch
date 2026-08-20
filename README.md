@@ -35,8 +35,12 @@ docker compose up -d --build
 The Compose topology builds a local `warp-proxy` gateway. On its first start it
 registers a free consumer WARP account, generates a profile, removes IPv6
 routes/addresses, creates WireProxy HTTP/SOCKS5 listeners, validates the
-configuration, and starts WireProxy. Credentials persist in the named
-`warp-state` volume, so later starts do not register again. The build pins
+configuration, and starts WireProxy. The derived profile replaces mixed DNS
+entries with the IPv4 resolver `1.1.1.1` and removes IPv6 routes and addresses. Credentials persist in the named
+`warp-state` volume, so later starts reuse healthy state. A bounded internal
+supervisor tolerates transient WireProxy `/readyz` failures and rotates the
+account only after sustained failures, with a persisted cooldown and capped
+registration backoff. The build pins
 wgcf `v2.2.29` and WireProxy `v1.1.2` and supports amd64/arm64. No manual
 `warp.conf`, host-specific detection, fscarmen script, TUN, or privileged mode
 is required. See [`warp-proxy/README.md`](warp-proxy/README.md) for details.

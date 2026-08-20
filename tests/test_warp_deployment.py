@@ -36,7 +36,7 @@ case "$1" in
 [Interface]
 PrivateKey = test-private-key
 Address = 172.16.0.2/32, 2606:4700:110:1234::2/128
-DNS = 1.1.1.1
+DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1001
 CheckAlive = 9.9.9.9
 CheckAliveInterval = 99
 
@@ -54,11 +54,16 @@ esac
         """#!/bin/sh
 set -eu
 printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wireproxy.calls"
+case "$1" in
+  --config) case "$*" in *--configtest) exit 0 ;; esac ;;
+esac
+kill -TERM "$PPID"
 """,
         encoding="utf-8",
     )
-    os.chmod(bin_dir / "wgcf", 0o755)
-    os.chmod(bin_dir / "wireproxy", 0o755)
+    (bin_dir / "wget").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for path in (bin_dir / "wgcf", bin_dir / "wireproxy", bin_dir / "wget"):
+        os.chmod(path, 0o755)
     return subprocess.run(
         ["sh", str(ENTRYPOINT)],
         check=False,
@@ -68,6 +73,8 @@ printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wireproxy.calls"
             **os.environ,
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "WARP_STATE_DIR": str(state_dir),
+            "WARP_READINESS_GRACE_PERIOD": "0",
+            "WARP_READINESS_INTERVAL": "0",
         },
     )
 
@@ -129,6 +136,8 @@ def test_first_start_registers_and_generates_ipv4_wireproxy_config(tmp_path: Pat
     assert "AllowedIPs = 0.0.0.0/0" in profile
     assert "::/0" not in profile
     assert "2606:" not in profile
+    assert "DNS = 1.1.1.1" in profile
+    assert profile.count("DNS =") == 1
     assert "[Socks5]\nBindAddress = 0.0.0.0:25344" in config
     assert "[http]\nBindAddress = 0.0.0.0:25345" in config
     assert "[Resolve]\nResolveStrategy = ipv4" in config
@@ -136,6 +145,112 @@ def test_first_start_registers_and_generates_ipv4_wireproxy_config(tmp_path: Pat
         f"--config {state_dir / 'wireproxy.conf'} --configtest",
         f"--config {state_dir / 'wireproxy.conf'} --info 0.0.0.0:9080",
     ]
+
+
+def test_persistent_unhealthy_readiness_rotates_stale_state(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    bin_dir.mkdir()
+    state_dir.mkdir()
+    (bin_dir / "wgcf").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wgcf.calls"
+case "$1" in
+  register) printf 'account-%s' "$(wc -l < "$WARP_STATE_DIR/wgcf.calls")" > "$WARP_STATE_DIR/wgcf-account.toml" ;;
+  generate) printf '[Interface]\\nAddress = 172.16.0.2/32\\nDNS = 1.1.1.1\\n[Peer]\\nAllowedIPs = 0.0.0.0/0\\n' > "$WARP_STATE_DIR/wgcf-profile.conf" ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wireproxy").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wireproxy.calls"
+case "$1" in
+  --config) case "$*" in *--configtest) exit 0 ;; esac ;;
+esac
+start_count=$(grep -c -- '--info' "$WARP_STATE_DIR/wireproxy.calls")
+if [ "$start_count" -gt 1 ]; then kill -TERM "$PPID"; exit 0; fi
+trap 'exit 0' TERM INT
+while :; do sleep 1; done
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wget").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    for path in (bin_dir / "wgcf", bin_dir / "wireproxy", bin_dir / "wget"):
+        os.chmod(path, 0o755)
+
+    result = subprocess.run(
+        ["sh", str(ENTRYPOINT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WARP_STATE_DIR": str(state_dir),
+            "WARP_READINESS_GRACE_PERIOD": "0",
+            "WARP_READINESS_INTERVAL": "0",
+            "WARP_READINESS_FAILURES": "2",
+            "WARP_ROTATION_COOLDOWN": "0",
+            "WARP_REGISTRATION_BACKOFF": "0",
+            "WARP_REGISTRATION_MAX_ATTEMPTS": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (state_dir / "wgcf.calls").read_text(encoding="utf-8").splitlines() == [
+        "register --accept-tos",
+        "generate",
+        "register --accept-tos",
+        "generate",
+    ]
+    assert (state_dir / "rotation-generation").read_text(encoding="utf-8").strip() == "1"
+
+
+def test_supervisor_configuration_has_safe_defaults_and_real_readiness() -> None:
+    compose = load_compose()["services"]["warp-proxy"]
+    environment = compose["environment"]
+    supervisor = (ROOT / "warp-proxy" / "supervisor.sh").read_text(encoding="utf-8")
+
+    assert environment["WARP_READINESS_GRACE_PERIOD"] == "${WARP_READINESS_GRACE_PERIOD:-15}"
+    assert environment["WARP_READINESS_INTERVAL"] == "${WARP_READINESS_INTERVAL:-10}"
+    assert environment["WARP_READINESS_FAILURES"] == "${WARP_READINESS_FAILURES:-6}"
+    assert environment["WARP_ROTATION_COOLDOWN"] == "${WARP_ROTATION_COOLDOWN:-300}"
+    assert "http://127.0.0.1:9080/readyz" in supervisor
+    assert "failures=0" in supervisor
+
+
+def test_rotation_supervisor_bounds_registration_and_never_logs_command_output() -> None:
+    supervisor = (ROOT / "warp-proxy" / "supervisor.sh").read_text(encoding="utf-8")
+
+    assert "WARP_REGISTRATION_MAX_ATTEMPTS:-5" in supervisor
+    assert "delay=$((delay * 2))" in supervisor
+    assert "[ \"$delay\" -gt 60 ] && delay=60" in supervisor
+    assert "wgcf register --accept-tos >/dev/null 2>&1" in supervisor
+    assert "wgcf generate >/dev/null 2>&1" in supervisor
+    assert "rotation-generation" in supervisor
+
+
+def test_rotation_supervisor_preserves_reuse_cooldown_and_signal_contracts() -> None:
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+    supervisor = (ROOT / "warp-proxy" / "supervisor.sh").read_text(encoding="utf-8")
+
+    assert 'if [ ! -s "$ACCOUNT_PATH" ]' in entrypoint
+    assert 'if [ ! -s "$PROFILE_PATH" ]' in entrypoint
+    assert "WARP_ROTATION_COOLDOWN:-300" in supervisor
+    assert 'trap \'stop_child; exit 0\' INT TERM HUP' in supervisor
+    assert 'kill -TERM "$child_pid"' in supervisor
+
+
+def test_supervisor_restarts_when_wireproxy_exits_unexpectedly() -> None:
+    supervisor = (ROOT / "warp-proxy" / "supervisor.sh").read_text(encoding="utf-8")
+
+    assert 'echo "WireProxy exited unexpectedly; restarting."' in supervisor
+    assert "child_pid=" in supervisor
+    assert "continue" in supervisor
 
 
 def test_later_start_reuses_persisted_credentials(tmp_path: Path) -> None:

@@ -8,6 +8,13 @@ services:
       - "9080"
     volumes:
       - warp-state:/var/lib/warp
+    environment:
+      WARP_READINESS_GRACE_PERIOD: "${WARP_READINESS_GRACE_PERIOD:-15}"
+      WARP_READINESS_INTERVAL: "${WARP_READINESS_INTERVAL:-10}"
+      WARP_READINESS_FAILURES: "${WARP_READINESS_FAILURES:-6}"
+      WARP_ROTATION_COOLDOWN: "${WARP_ROTATION_COOLDOWN:-300}"
+      WARP_REGISTRATION_BACKOFF: "${WARP_REGISTRATION_BACKOFF:-5}"
+      WARP_REGISTRATION_MAX_ATTEMPTS: "${WARP_REGISTRATION_MAX_ATTEMPTS:-5}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
