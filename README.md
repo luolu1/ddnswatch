@@ -45,6 +45,8 @@ wgcf `v2.2.29` and WireProxy `v1.1.2` and supports amd64/arm64. No manual
 `warp.conf`, host-specific detection, fscarmen script, TUN, or privileged mode
 is required. See [`warp-proxy/README.md`](warp-proxy/README.md) for details.
 
+在持续 `/readyz` 失败时，网关先保留当前账户、私钥、公钥和 IPv4 地址，按固定顺序尝试官方端口 `2408`、`500`、`1701`、`4500`。当前端口和候选索引保存在不含密钥的状态文件中，容器重启时优先尝试上次端口。只有四个端口全部失败后才归档并重新注册 WARP 账户。日志会区分端口切换、端口耗尽、账户轮换、冷却抑制和注册失败，不会输出密钥或账户内容。
+
 Compose 会在本地构建 `warp-proxy` 网关。首次启动时，网关自动接受 WARP
 服务条款并注册免费消费者账户，生成配置后移除 IPv6 地址和 `::/0` 路由，
 再启动仅供 Compose 内部使用的 HTTP/SOCKS5 代理。账户和密钥保存在

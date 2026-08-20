@@ -7,6 +7,10 @@ account_path=$3
 profile_path=$4
 ipv4_profile_path=$5
 profile_script=$6
+endpoint_script=$7
+failover_script=$8
+endpoint_port_path="$state_dir/endpoint-port"
+endpoint_index_path="$state_dir/endpoint-index"
 
 readiness_url=${WARP_READINESS_URL:-http://127.0.0.1:9080/readyz}
 grace_period=${WARP_READINESS_GRACE_PERIOD:-15}
@@ -18,6 +22,12 @@ registration_max_attempts=${WARP_REGISTRATION_MAX_ATTEMPTS:-5}
 generation_path="$state_dir/rotation-generation"
 last_rotation_path="$state_dir/rotation-last-at"
 child_pid=
+
+endpoint_state=$(sh "$endpoint_script" "$endpoint_port_path" "$endpoint_index_path")
+endpoint_index=${endpoint_state%|*}
+endpoint_port=${endpoint_state#*|}
+
+. "$failover_script"
 
 stop_child() {
     if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
@@ -63,7 +73,7 @@ rotate_state() {
     done
     printf '%s\n' "$now" > "$last_rotation_path"
     cd "$state_dir"
-    if ! register_account || ! wgcf generate >/dev/null 2>&1 || ! sh "$profile_script" "$profile_path" "$ipv4_profile_path"; then
+    if ! register_account || ! wgcf generate >/dev/null 2>&1 || ! sh "$profile_script" "$profile_path" "$ipv4_profile_path" 2408; then
         rm -f "$account_path" "$profile_path" "$ipv4_profile_path"
         for archived_path in "$archive_dir"/*; do
             [ -e "$archived_path" ] && mv "$archived_path" "$state_dir/"
@@ -71,10 +81,14 @@ rotate_state() {
         echo "WARP rotation failed; prior state restored." >&2
         return 1
     fi
+    endpoint_index=0
+    endpoint_port=2408
+    printf '%s\n' "$endpoint_index" > "$endpoint_index_path"
+    printf '%s\n' "$endpoint_port" > "$endpoint_port_path"
     generation=0
     [ -s "$generation_path" ] && generation=$(cat "$generation_path")
     printf '%s\n' $((generation + 1)) > "$generation_path"
-    echo "WARP rotation completed; generation $((generation + 1))." >&2
+    echo "WARP account rotation completed; generation $((generation + 1))." >&2
 }
 
 start_child() {
@@ -93,18 +107,22 @@ while :; do
             failures=$((failures + 1))
             if [ "$failures" -ge "$failure_threshold" ]; then
                 stop_child
-                if rotate_state; then
+                if advance_endpoint; then
+                    break
+                elif rotate_state; then
+                    break
+                else
                     break
                 fi
-                start_child
-                failures=0
             fi
         fi
         sleep "$readiness_interval"
     done
     wait "$child_pid" 2>/dev/null || true
     child_pid=
-    echo "WireProxy exited unexpectedly; restarting." >&2
+    if [ "$failures" -lt "$failure_threshold" ]; then
+        echo "WireProxy exited unexpectedly; restarting." >&2
+    fi
     sleep "$readiness_interval"
     continue
 done

@@ -15,6 +15,7 @@ services:
       WARP_ROTATION_COOLDOWN: "${WARP_ROTATION_COOLDOWN:-300}"
       WARP_REGISTRATION_BACKOFF: "${WARP_REGISTRATION_BACKOFF:-5}"
       WARP_REGISTRATION_MAX_ATTEMPTS: "${WARP_REGISTRATION_MAX_ATTEMPTS:-5}"
+      WARP_ENDPOINT_PORTS: "${WARP_ENDPOINT_PORTS:-2408,500,1701,4500}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]

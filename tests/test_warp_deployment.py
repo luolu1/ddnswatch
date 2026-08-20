@@ -4,6 +4,7 @@ import os
 import socketserver
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -147,7 +148,7 @@ def test_first_start_registers_and_generates_ipv4_wireproxy_config(tmp_path: Pat
     ]
 
 
-def test_persistent_unhealthy_readiness_rotates_stale_state(tmp_path: Path) -> None:
+def test_persistent_unhealthy_readiness_switches_endpoint_before_rotation(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     state_dir = tmp_path / "state"
     bin_dir.mkdir()
@@ -158,7 +159,7 @@ set -eu
 printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wgcf.calls"
 case "$1" in
   register) printf 'account-%s' "$(wc -l < "$WARP_STATE_DIR/wgcf.calls")" > "$WARP_STATE_DIR/wgcf-account.toml" ;;
-  generate) printf '[Interface]\\nAddress = 172.16.0.2/32\\nDNS = 1.1.1.1\\n[Peer]\\nAllowedIPs = 0.0.0.0/0\\n' > "$WARP_STATE_DIR/wgcf-profile.conf" ;;
+  generate) printf '[Interface]\\nAddress = 172.16.0.2/32\\nDNS = 1.1.1.1\\n[Peer]\\nAllowedIPs = 0.0.0.0/0\\nEndpoint = engage.cloudflareclient.com:2408\\n' > "$WARP_STATE_DIR/wgcf-profile.conf" ;;
 esac
 """,
         encoding="utf-8",
@@ -204,10 +205,151 @@ while :; do sleep 1; done
     assert (state_dir / "wgcf.calls").read_text(encoding="utf-8").splitlines() == [
         "register --accept-tos",
         "generate",
+    ]
+    assert (state_dir / "endpoint-port").read_text(encoding="utf-8").strip() == "500"
+
+
+def _run_until_marker(process: subprocess.Popen[str], marker: Path) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not marker.exists():
+        time.sleep(0.01)
+    process.terminate()
+    process.wait(timeout=5)
+    assert marker.exists()
+
+
+def test_endpoint_failover_preserves_account_and_persists_port(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    marker = state_dir / "port-500-ready"
+    bin_dir.mkdir()
+    state_dir.mkdir()
+    (bin_dir / "wgcf").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wgcf.calls"
+case "$1" in
+  register) printf 'account-secret' > "$WARP_STATE_DIR/wgcf-account.toml" ;;
+  generate) printf '[Interface]\\nPrivateKey = private-key\\nAddress = 172.16.0.2/32\\nDNS = 1.1.1.1\\nMTU = 1280\\n[Peer]\\nPublicKey = peer-key\\nAllowedIPs = 0.0.0.0/0\\nCheckAlive = 1.1.1.1\\nCheckAliveInterval = 5\\nEndpoint = engage.cloudflareclient.com:2408\\n' > "$WARP_STATE_DIR/wgcf-profile.conf" ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wireproxy").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wireproxy.calls"
+case "$*" in *--configtest) exit 0 ;; esac
+trap 'exit 0' TERM INT
+while :; do sleep 1; done
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wget").write_text(
+        """#!/bin/sh
+set -eu
+if grep -q 'Endpoint = engage.cloudflareclient.com:500' "$WARP_STATE_DIR/wgcf-profile-ipv4.conf"; then
+  : > "$WARP_STATE_DIR/port-500-ready"
+  exit 0
+fi
+exit 1
+""",
+        encoding="utf-8",
+    )
+    for path in (bin_dir / "wgcf", bin_dir / "wireproxy", bin_dir / "wget"):
+        os.chmod(path, 0o755)
+    process = subprocess.Popen(
+        ["sh", str(ENTRYPOINT)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WARP_STATE_DIR": str(state_dir),
+            "WARP_READINESS_GRACE_PERIOD": "0",
+            "WARP_READINESS_INTERVAL": "0",
+            "WARP_READINESS_FAILURES": "2",
+            "WARP_ROTATION_COOLDOWN": "300",
+        },
+    )
+
+    _run_until_marker(process, marker)
+
+    assert (state_dir / "wgcf-account.toml").read_text(encoding="utf-8") == "account-secret"
+    assert (state_dir / "wgcf-profile-ipv4.conf").read_text(encoding="utf-8").count(
+        "Endpoint = engage.cloudflareclient.com:500"
+    ) == 1
+    assert (state_dir / "wgcf.calls").read_text(encoding="utf-8").splitlines() == [
         "register --accept-tos",
         "generate",
     ]
-    assert (state_dir / "rotation-generation").read_text(encoding="utf-8").strip() == "1"
+    assert (state_dir / "endpoint-port").read_text(encoding="utf-8").strip() == "500"
+
+
+def test_all_endpoint_failures_rotate_only_after_exhaustion(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    state_dir = tmp_path / "state"
+    marker = state_dir / "rotated-ready"
+    bin_dir.mkdir()
+    state_dir.mkdir()
+    (bin_dir / "wgcf").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wgcf.calls"
+case "$1" in
+  register) printf 'account-%s' "$(grep -c 'register' "$WARP_STATE_DIR/wgcf.calls")" > "$WARP_STATE_DIR/wgcf-account.toml" ;;
+  generate) printf '[Interface]\\nPrivateKey = fresh-private\\nAddress = 172.16.0.2/32\\nDNS = 1.1.1.1\\n[Peer]\\nPublicKey = fresh-peer\\nAllowedIPs = 0.0.0.0/0\\nEndpoint = engage.cloudflareclient.com:2408\\n' > "$WARP_STATE_DIR/wgcf-profile.conf" ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wireproxy").write_text(
+        """#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$WARP_STATE_DIR/wireproxy.calls"
+case "$*" in *--configtest) exit 0 ;; esac
+trap 'exit 0' TERM INT
+while :; do sleep 1; done
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "wget").write_text(
+        """#!/bin/sh
+set -eu
+if grep -q 'account-2' "$WARP_STATE_DIR/wgcf-account.toml"; then
+  : > "$WARP_STATE_DIR/rotated-ready"
+  exit 0
+fi
+exit 1
+""",
+        encoding="utf-8",
+    )
+    for path in (bin_dir / "wgcf", bin_dir / "wireproxy", bin_dir / "wget"):
+        os.chmod(path, 0o755)
+    process = subprocess.Popen(
+        ["sh", str(ENTRYPOINT)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "WARP_STATE_DIR": str(state_dir),
+            "WARP_READINESS_GRACE_PERIOD": "0",
+            "WARP_READINESS_INTERVAL": "0",
+            "WARP_READINESS_FAILURES": "1",
+            "WARP_ROTATION_COOLDOWN": "0",
+            "WARP_REGISTRATION_BACKOFF": "0",
+            "WARP_REGISTRATION_MAX_ATTEMPTS": "1",
+        },
+    )
+
+    _run_until_marker(process, marker)
+
+    calls = (state_dir / "wgcf.calls").read_text(encoding="utf-8").splitlines()
+    assert calls == ["register --accept-tos", "generate", "register --accept-tos", "generate"]
+    assert (state_dir / "endpoint-port").read_text(encoding="utf-8").strip() == "2408"
 
 
 def test_supervisor_configuration_has_safe_defaults_and_real_readiness() -> None:
@@ -219,8 +361,21 @@ def test_supervisor_configuration_has_safe_defaults_and_real_readiness() -> None
     assert environment["WARP_READINESS_INTERVAL"] == "${WARP_READINESS_INTERVAL:-10}"
     assert environment["WARP_READINESS_FAILURES"] == "${WARP_READINESS_FAILURES:-6}"
     assert environment["WARP_ROTATION_COOLDOWN"] == "${WARP_ROTATION_COOLDOWN:-300}"
+    assert environment["WARP_ENDPOINT_PORTS"] == "${WARP_ENDPOINT_PORTS:-2408,500,1701,4500}"
     assert "http://127.0.0.1:9080/readyz" in supervisor
     assert "failures=0" in supervisor
+
+
+def test_endpoint_candidates_are_exact_and_operator_events_are_secret_safe() -> None:
+    supervisor = (ROOT / "warp-proxy" / "supervisor.sh").read_text(encoding="utf-8")
+    profile = (ROOT / "warp-proxy" / "profile.sh").read_text(encoding="utf-8")
+
+    assert "2408,500,1701,4500" in (ROOT / "warp-proxy" / "endpoint.sh").read_text(encoding="utf-8")
+    assert "endpoint candidates exhausted" in (ROOT / "warp-proxy" / "failover.sh").read_text(encoding="utf-8")
+    assert "endpoint switch" in (ROOT / "warp-proxy" / "failover.sh").read_text(encoding="utf-8")
+    assert "account rotation" in supervisor
+    assert "wgcf register --accept-tos >/dev/null 2>&1" in supervisor
+    assert "Endpoint = engage.cloudflareclient.com:" in profile
 
 
 def test_rotation_supervisor_bounds_registration_and_never_logs_command_output() -> None:

@@ -4,8 +4,15 @@ set -eu
 profile_path=$1
 output_path=$2
 temporary_path="$output_path.tmp"
+rewritten_path="$output_path.rewritten.tmp"
+endpoint_port=${3:-2408}
 
-awk '
+case "$endpoint_port" in
+    2408|500|1701|4500) : ;;
+    *) echo "IPv4 profile generation failed: unsupported endpoint port." >&2; exit 1 ;;
+esac
+
+awk -v endpoint_port="$endpoint_port" '
 function trim(value) {
     sub(/^[[:space:]]+/, "", value)
     sub(/[[:space:]]+$/, "", value)
@@ -40,9 +47,14 @@ function trim(value) {
     }
     next
 }
+/^[[:space:]]*Endpoint[[:space:]]*=/ {
+    print "Endpoint = engage.cloudflareclient.com:" endpoint_port
+    endpoint_written = 1
+    next
+}
 { print }
 END {
-    if (!ipv4_address_found || !allowed_ips_written || !dns_written) {
+    if (!ipv4_address_found || !allowed_ips_written || !dns_written || !endpoint_written) {
         exit 1
     }
 }
@@ -59,7 +71,8 @@ awk '
     checks_written = 1
 }
 { print }
-' "$temporary_path" > "$output_path"
+' "$temporary_path" > "$rewritten_path"
+mv "$rewritten_path" "$output_path"
 rm -f "$temporary_path"
 
 if grep -E '^[[:space:]]*(Address|AllowedIPs|DNS)[[:space:]]*=' "$output_path" | grep -q ':'; then
